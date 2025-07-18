@@ -1,0 +1,20 @@
+{
+  "name": "twilioapi",
+  "version": "1.0.0",
+  "main": "twilioExample.js",
+  "scripts": {
+    "dev": "nodemon twilioExample.js",
+    "start": "node twilioExample.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@google/genai": "^1.10.0",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "sqlite3": "^5.1.7",
+    "twilio": "^5.7.1"
+  }
+}

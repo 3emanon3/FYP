@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Word Blocks Manager</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Sidebar Toggle Button -->
+    <button class="sidebar-toggle" onclick="toggleSidebar()">☰ Menu</button>
+
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-content">
+            <div class="sidebar-setting">
+                <label for="twilioSid">TWILIO_ACCOUNT_SID</label>
+                <input type="text" id="twilioSid" placeholder="21dg79e2gh378y23h">
+            </div>
+            <div class="sidebar-setting">
+                <label for="twilioToken">TWILIO_AUTH_TOKEN</label>
+                <input type="text" id="twilioToken" placeholder="321b978d32b783h91">
+            </div>
+            <div class="sidebar-setting">
+                <label for="twilioPhone">TWILIO_PHONE_NUMBER</label>
+                <input type="text" id="twilioPhone" placeholder="+6034297543">
+            </div>
+            <div class="sidebar-setting">
+                <label for="geminiApiKeys">GEMINI_API_KEYS</label>
+                <input type="text" id="geminiApiKeys" placeholder="your-gemini-api-keys">
+            </div>
+            <button class="sidebar-save-btn" onclick="saveTwilioInformation()">Save Information</button>
+        </div>
+    </div>
+
+    <div class="loading" id="loading">Loading...</div>
+    <div class="error-message" id="errorMessage"></div>
+    <div class="success-message" id="successMessage"></div>
+
+    <div class="container">
+        <div class="block-container inactive" id="leftContainer">
+            <h2>Inactive Blocks</h2>
+            <div class="drop-zone" id="leftDropZone">
+                Drop blocks here to deactivate
+            </div>
+            <div id="leftBlocks"></div>
+            <button class="add-block-btn" onclick="showAddBlockModal()">+ Add New Block</button>
+        </div>
+
+        <div class="block-container active" id="rightContainer">
+            <h2>Active Blocks</h2>
+            <div class="drop-zone" id="rightDropZone">
+                Drop blocks here to activate
+            </div>
+            <div id="rightBlocks"></div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <button class="footer-btn" onclick="saveArrangement()">Save Arrangement</button>
+        <button class="footer-btn" onclick="resetToDefaults()">Reset to Defaults</button>
+    </div>
+
+    <div class="input-modal" id="inputModal">
+        <div class="modal-content">
+            <h3>Add New Word Block</h3>
+            <input type="text" id="blockTextInput" placeholder="Enter text for the block..." maxlength="9999999">
+            <div class="modal-buttons">
+                <button class="modal-btn primary" onclick="addNewBlock()">Add Block</button>
+                <button class="modal-btn secondary" onclick="hideAddBlockModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
