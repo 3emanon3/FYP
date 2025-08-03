@@ -4,9 +4,15 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const cors = require('cors');
 const fs = require('fs');
+const { spawn, exec } = require('child_process');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
+
+// Service management variables
+let whatsappService = null;
+let ngrokService = null;
+let ngrokUrl = null;
 
 // Middleware
 app.use(cors());
@@ -74,6 +80,28 @@ function insertDefaultBlocks() {
     });
 }
 
+// Helper function to get ngrok URL from API
+async function getNgrokUrl() {
+    try {
+        
+        const response = await fetch('http://127.0.0.1:4040/api/tunnels');
+        if (!response.ok) {
+            throw new Error(`Ngrok API responded with status: ${response.status}`);
+        }
+        const data = await response.json();
+        
+        const httpsTunnel = data.tunnels.find(tunnel => 
+            tunnel.proto === 'https' && 
+            tunnel.config.addr === 'http://localhost:3000'
+        );
+        
+        return httpsTunnel ? httpsTunnel.public_url : null;
+    } catch (error) {
+        console.error('Error details when getting ngrok URL:', error.message);
+        return null;
+    }
+}
+
 // Helper function to update .env file
 function updateEnvFile(envPath, updates) {
     return new Promise((resolve, reject) => {
@@ -119,6 +147,30 @@ function updateEnvFile(envPath, updates) {
         } catch (err) {
             reject(new Error(`Failed to write .env file: ${err.message}`));
         }
+    });
+}
+
+// Helper function to kill process gracefully
+function killProcessGracefully(process, processName) {
+    return new Promise((resolve) => {
+        if (!process || process.killed) {
+            resolve();
+            return;
+        }
+        
+        console.log(`Stopping ${processName}...`);
+        
+        // Send Ctrl+C (SIGINT)
+        process.kill('SIGINT');
+        
+        // Wait a moment for graceful shutdown
+        setTimeout(() => {
+            if (!process.killed) {
+                console.log(`Force killing ${processName}...`);
+                process.kill('SIGKILL');
+            }
+            resolve();
+        }, 3000);
     });
 }
 
@@ -350,6 +402,181 @@ app.put('/api/information', async (req, res) => {
     }
 });
 
+// NEW ENDPOINTS - Service Management
+
+// Start WhatsApp service and ngrok
+app.get('/api/service/start', async (req, res) => {
+    try {
+        if (whatsappService && !whatsappService.killed) {
+            return res.status(400).json({ 
+                error: 'WhatsApp service is already running',
+                url: ngrokUrl 
+            });
+        }
+        
+        console.log('Starting WhatsApp service...');
+        
+        const servicePath = path.join(__dirname, '..', 'TwilioAPI');
+        
+        if (!fs.existsSync(servicePath)) {
+            return res.status(400).json({ 
+                error: `Service directory not found: ${servicePath}` 
+            });
+        }
+        
+        whatsappService = spawn('npm', ['start'], {
+            cwd: servicePath,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            shell: true
+        });
+        
+        let serviceStarted = false;
+        
+        whatsappService.stdout.on('data', (data) => {
+            const output = data.toString();
+            console.log('WhatsApp Service:', output);
+            
+            if (output.includes('WhatsApp Gemini AI chatbot server running on port 3000') && !serviceStarted) {
+                serviceStarted = true;
+                
+                console.log('WhatsApp service confirmed running. Starting ngrok...');
+                
+                ngrokService = spawn('ngrok', ['http', '3000'], {
+                    stdio: 'ignore',
+                    shell: true
+                });
+
+                ngrokService.on('close', (code) => {
+                    console.log(`Ngrok process exited with code ${code}`);
+                    ngrokUrl = null;
+                });
+
+                const maxRetries = 15; 
+                const retryDelay = 2000; 
+
+
+                const attemptToGetNgrokUrl = async (retries) => {
+                    console.log(`Attempting to get ngrok URL... (Attempt ${retries + 1})`);
+
+                    try {
+                        const url = await getNgrokUrl(); 
+                        
+                        if (url) {
+                            ngrokUrl = url;
+                            console.log('Services started successfully. Ngrok URL:', ngrokUrl);
+                            res.json({ 
+                                message: 'Services started successfully',
+                                url: ngrokUrl 
+                            });
+                        } else if (retries < maxRetries) {
+                            console.log('Ngrok API not ready yet. Retrying in 2 seconds...');
+                            setTimeout(() => attemptToGetNgrokUrl(retries + 1), retryDelay);
+                        } else {
+                            console.error('Ngrok startup timeout after multiple retries.');
+                            res.status(500).json({ 
+                                error: 'Ngrok failed to start within the timeout period.' 
+                            });
+                        }
+                    } catch (error) {
+                        if (retries < maxRetries) {
+                            console.log('Error connecting to Ngrok API. Retrying in 2 seconds...');
+                            setTimeout(() => attemptToGetNgrokUrl(retries + 1), retryDelay);
+                        } else {
+                            console.error('Could not connect to Ngrok API after multiple retries.', error);
+                            res.status(500).json({ 
+                                error: 'Failed to connect to Ngrok API.',
+                                details: error.message
+                            });
+                        }
+                    }
+                };
+
+                setTimeout(() => attemptToGetNgrokUrl(0), 2000);
+            }
+        });
+        
+        whatsappService.stderr.on('data', (data) => {
+            console.error('WhatsApp Service Error:', data.toString());
+        });
+        
+        whatsappService.on('close', (code) => {
+            console.log(`WhatsApp service process exited with code ${code}`);
+            whatsappService = null;
+        });
+        
+    } catch (error) {
+        console.error('Error starting services:', error);
+        res.status(500).json({ 
+            error: 'Failed to start services', 
+            details: error.message 
+        });
+    }
+});
+
+// Stop WhatsApp service and ngrok
+app.get('/api/service/stop', async (req, res) => {
+    try {
+        console.log('Stopping services...');
+        
+        // Stop both services
+        const stopPromises = [];
+        
+        if (ngrokService && !ngrokService.killed) {
+            stopPromises.push(killProcessGracefully(ngrokService, 'Ngrok'));
+        }
+        
+        if (whatsappService && !whatsappService.killed) {
+            stopPromises.push(killProcessGracefully(whatsappService, 'WhatsApp Service'));
+        }
+        
+        if (stopPromises.length === 0) {
+            return res.json({ 
+                message: 'No services were running' 
+            });
+        }
+        
+        // Wait for all services to stop
+        await Promise.all(stopPromises);
+        
+        // Reset variables
+        whatsappService = null;
+        ngrokService = null;
+        ngrokUrl = null;
+        
+        console.log('All services stopped successfully');
+        res.json({ 
+            message: 'Services stopped successfully' 
+        });
+        
+    } catch (error) {
+        console.error('Error stopping services:', error);
+        res.status(500).json({ 
+            error: 'Failed to stop services', 
+            details: error.message 
+        });
+    }
+});
+
+// Get service status
+app.get('/api/service/status', (req, res) => {
+    const isWhatsAppRunning = whatsappService && !whatsappService.killed;
+    const isNgrokRunning = ngrokService && !ngrokService.killed;
+    
+    res.json({
+        whatsappService: {
+            running: isWhatsAppRunning,
+            pid: isWhatsAppRunning ? whatsappService.pid : null
+        },
+        ngrokService: {
+            running: isNgrokRunning,
+            pid: isNgrokRunning ? ngrokService.pid : null,
+            url: ngrokUrl
+        },
+        status: (isWhatsAppRunning && isNgrokRunning) ? 'running' : 
+                (isWhatsAppRunning || isNgrokRunning) ? 'partial' : 'stopped'
+    });
+});
+
 // Serve the main HTML file
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -367,8 +594,23 @@ app.listen(PORT, () => {
 });
 
 // Graceful shutdown
-process.on('SIGINT', () => {
-    console.log('\nClosing database connection...');
+process.on('SIGINT', async () => {
+    console.log('\nShutting down server...');
+    
+    // Stop services first
+    const stopPromises = [];
+    
+    if (ngrokService && !ngrokService.killed) {
+        stopPromises.push(killProcessGracefully(ngrokService, 'Ngrok'));
+    }
+    
+    if (whatsappService && !whatsappService.killed) {
+        stopPromises.push(killProcessGracefully(whatsappService, 'WhatsApp Service'));
+    }
+    
+    await Promise.all(stopPromises);
+    
+    // Close database connection
     db.close((err) => {
         if (err) {
             console.error('Error closing database:', err.message);

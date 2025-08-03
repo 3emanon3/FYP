@@ -57,7 +57,7 @@
     </div>
 
     <div class="footer">
-        <button class="footer-btn" onclick="saveArrangement()">Save Arrangement</button>
+        <button class="footer-btn" id="service-control-btn" onclick="toggleService()">Start Services</button>
         <button class="footer-btn" onclick="resetToDefaults()">Reset to Defaults</button>
     </div>
 
@@ -68,6 +68,37 @@
             <div class="modal-buttons">
                 <button class="modal-btn primary" onclick="addNewBlock()">Add Block</button>
                 <button class="modal-btn secondary" onclick="hideAddBlockModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="input-modal" id="editModal">
+        <div class="modal-content">
+            <h3>Edit Word Block</h3>
+            <input type="hidden" id="editBlockId">
+            <input type="text" id="blockTextInputEdit" placeholder="Enter text for the block..." maxlength="9999999">
+            <div class="modal-buttons">
+                <button class="modal-btn primary" onclick="updateBlock()">Update Block</button>
+                <button class="modal-btn secondary" onclick="hideEditBlockModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="input-modal" id="serviceModal">
+        <div class="modal-content">
+            <h3>Services Started Successfully</h3>
+            <p>
+                Please copy the following URL and paste it into your Twilio WhatsApp Sandbox settings under "When a message comes in":
+            </p>
+            <div class="url-display-container">
+                <input type="text" id="ngrokUrlDisplay" readonly>
+                <button class="modal-btn secondary" onclick="copyUrlToClipboard()">Copy</button>
+            </div>
+            <p class="modal-warning">
+                Do not close or refresh this page, as this will stop the service.
+            </p>
+            <div class="modal-buttons">
+                <button class="modal-btn danger" onclick="toggleService()">Stop Services</button>
             </div>
         </div>
     </div>

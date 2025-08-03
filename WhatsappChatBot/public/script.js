@@ -3,6 +3,11 @@ let blocks = [];
 let nextId = 1;
 let draggedElement = null;
 
+// DOM Elements
+let serviceControlButton;
+let serviceModal;
+let ngrokUrlDisplay;
+
 // Sidebar functionality
 function toggleSidebar() {
     const sidebar = document.getElementById('sidebar');
@@ -40,6 +45,111 @@ function showSuccess(message) {
     successEl.textContent = message;
     successEl.classList.add('show');
     setTimeout(() => successEl.classList.remove('show'), 3000);
+}
+
+// Service Management Functions
+async function toggleService() {
+    const isRunning = serviceControlButton.classList.contains('active');
+    if (isRunning) {
+        await stopService();
+    } else {
+        await startService();
+    }
+}
+
+async function startService() {
+    showLoading();
+    try {
+        const response = await fetch(`${API_BASE}/service/start`);
+        const data = await response.json();
+
+        if (!response.ok) {
+            if (data.url) {
+                showServiceModal(data.url);
+                updateServiceUi(true);
+            }
+            throw new Error(data.error || 'Failed to start services');
+        }
+
+        showSuccess(data.message);
+        showServiceModal(data.url);
+        updateServiceUi(true);
+
+    } catch (error) {
+        showError(error.message);
+        updateServiceUi(false);
+    } finally {
+        hideLoading();
+    }
+}
+
+async function stopService() {
+    showLoading();
+    try {
+        const response = await fetch(`${API_BASE}/service/stop`);
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to stop services');
+        }
+
+        showSuccess(data.message);
+        hideServiceModal();
+        updateServiceUi(false);
+
+    } catch (error) {
+        showError(error.message);
+    } finally {
+        hideLoading();
+    }
+}
+
+async function checkServiceStatus() {
+    try {
+        const response = await fetch(`${API_BASE}/service/status`);
+        if (!response.ok) return;
+
+        const data = await response.json();
+        if (data.status === 'running' && data.ngrokService.url) {
+            showServiceModal(data.ngrokService.url);
+            updateServiceUi(true);
+        } else {
+            updateServiceUi(false);
+        }
+    } catch (error) {
+        console.error('Could not fetch service status:', error);
+        updateServiceUi(false);
+    }
+}
+
+function updateServiceUi(isRunning) {
+    if (isRunning) {
+        serviceControlButton.textContent = 'Stop Services';
+        serviceControlButton.classList.add('active');
+    } else {
+        serviceControlButton.textContent = 'Start Services';
+        serviceControlButton.classList.remove('active');
+    }
+}
+
+function showServiceModal(url) {
+    ngrokUrlDisplay.value = url + '/webhook';
+    serviceModal.classList.add('show');
+}
+
+function hideServiceModal() {
+    serviceModal.classList.remove('show');
+}
+
+function copyUrlToClipboard() {
+    ngrokUrlDisplay.select();
+    ngrokUrlDisplay.setSelectionRange(0, 99999);
+    try {
+        document.execCommand('copy');
+        showSuccess('URL copied to clipboard!');
+    } catch (err) {
+        showError('Failed to copy URL.');
+    }
 }
 
 // API functions
@@ -111,7 +221,6 @@ async function deleteBlockFromDatabase(blockId) {
 
 async function updateArrangementInDatabase(activeBlocks) {
     try {
-        // Send only the IDs in the correct order
         const blockIds = activeBlocks.map(block => ({ id: block.id }));
         
         const response = await fetch(`${API_BASE}/blocks/arrangement`, {
@@ -174,7 +283,7 @@ async function saveTwilioInformation() {
 async function fetchTwilioInformation() {
     try {
         const response = await fetch(`${API_BASE}/information`);
-        if (!response.ok) return; // Silently fail if not found
+        if (!response.ok) return;
 
         const data = await response.json();
         if (data) {
@@ -195,17 +304,14 @@ function renderBlocks() {
     leftContainer.innerHTML = '';
     rightContainer.innerHTML = '';
 
-    // Sort active blocks by arrangement
     const activeBlocks = blocks.filter(b => b.isActive).sort((a, b) => (a.arrangement || 0) - (b.arrangement || 0));
     const inactiveBlocks = blocks.filter(b => !b.isActive);
 
-    // Render active blocks
     activeBlocks.forEach(block => {
         const blockElement = createBlockElement(block);
         rightContainer.appendChild(blockElement);
     });
 
-    // Render inactive blocks
     inactiveBlocks.forEach(block => {
         const blockElement = createBlockElement(block);
         leftContainer.appendChild(blockElement);
@@ -218,26 +324,34 @@ function createBlockElement(block) {
     div.draggable = true;
     div.dataset.blockId = block.id;
     
-    const actionsHtml = block.isActive 
-        ? `<input type="number" class="arrangement-input" value="${(block.arrangement || 0) + 1}" 
+    let arrangementInputHtml = '';
+    if (block.isActive) {
+        arrangementInputHtml = `<input type="number" class="arrangement-input" value="${(block.arrangement || 0) + 1}" 
              onchange="updateArrangement('${block.id}', this.value)" 
              onclick="event.stopPropagation()" 
-             min="1">`
-        : '';
-    
-    const deleteBtn = !block.isDefault 
-        ? `<button class="delete-btn" onclick="deleteBlock('${block.id}')">×</button>`
-        : '';
+             min="1">`;
+    }
+
+    let editBtnHtml = '';
+    if (!block.isActive) {
+        const escapedText = JSON.stringify(block.text);
+        editBtnHtml = `<button class="edit-btn" onclick='showEditBlockModal("${block.id}", ${escapedText})' onclick="event.stopPropagation()">✎</button>`;
+    }
+
+    let deleteBtnHtml = '';
+    if (!block.isDefault) {
+        deleteBtnHtml = `<button class="delete-btn" onclick="deleteBlock('${block.id}')" onclick="event.stopPropagation()">×</button>`;
+    }
     
     div.innerHTML = `
         <div class="word-block-content">${block.text}</div>
         <div class="word-block-actions">
-            ${actionsHtml}
-            ${deleteBtn}
+            ${arrangementInputHtml}
+            ${editBtnHtml}
+            ${deleteBtnHtml}
         </div>
     `;
 
-    // Add drag event listeners
     div.addEventListener('dragstart', handleDragStart);
     div.addEventListener('dragend', handleDragEnd);
 
@@ -245,61 +359,41 @@ function createBlockElement(block) {
 }
 
 async function updateArrangement(blockId, newPosition) {
-    const position = parseInt(newPosition);
+    const position = parseInt(newPosition, 10);
     
     if (isNaN(position) || position < 1) {
-        showError('Please enter a valid position number (1 or higher)');
-        renderBlocks(); // Re-render to restore original value
+        showError('请输入一个有效的位置数字 (大于等于1)');
+        renderBlocks(); 
         return;
     }
 
     try {
-        showLoading();
+        showLoading(); 
         
-        const block = blocks.find(b => b.id === blockId);
-        if (!block) throw new Error('Block not found');
+        let activeBlocks = blocks.filter(b => b.isActive).sort((a, b) => (a.arrangement || 0) - (b.arrangement || 0));
+        
+        const blockToMove = activeBlocks.find(b => b.id === blockId);
+        if (!blockToMove) throw new Error('找不到这个积木块');
+        
+        activeBlocks = activeBlocks.filter(b => b.id !== blockId);
+        
+        const newIndex = Math.max(0, Math.min(position - 1, activeBlocks.length));
+        activeBlocks.splice(newIndex, 0, blockToMove);
 
-        const activeBlocks = blocks.filter(b => b.isActive);
-        const maxPosition = activeBlocks.length;
-        
-        // Clamp position to valid range
-        const clampedPosition = Math.min(position, maxPosition);
-        
-        // Update arrangements
-        const targetArrangement = clampedPosition - 1;
-        const currentArrangement = block.arrangement || 0;
-        
-        if (targetArrangement !== currentArrangement) {
-            // Reorder blocks
-            activeBlocks.forEach(b => {
-                if (b.id === blockId) {
-                    b.arrangement = targetArrangement;
-                } else if (targetArrangement > currentArrangement) {
-                    // Moving down: shift blocks up
-                    if (b.arrangement > currentArrangement && b.arrangement <= targetArrangement) {
-                        b.arrangement--;
-                    }
-                } else {
-                    // Moving up: shift blocks down
-                    if (b.arrangement >= targetArrangement && b.arrangement < currentArrangement) {
-                        b.arrangement++;
-                    }
-                }
-            });
-            
-            // Update in database
-            await updateArrangementInDatabase(activeBlocks);
-            
-            renderBlocks();
-            showSuccess('Arrangement updated successfully');
-        } else {
-            renderBlocks(); // Re-render to restore original display
-        }
+        activeBlocks.forEach((block, index) => {
+            block.arrangement = index;
+        });
+
+        await updateArrangementInDatabase(activeBlocks);
+
+        renderBlocks();
+        showSuccess('排序更新成功！');
+
     } catch (error) {
-        showError('Error updating arrangement: ' + error.message);
-        renderBlocks(); // Re-render to restore original value
+        showError('更新排序时出错: ' + error.message);
+        renderBlocks(); 
     } finally {
-        hideLoading();
+        hideLoading(); 
     }
 }
 
@@ -314,7 +408,6 @@ function handleDragEnd(e) {
     draggedElement = null;
 }
 
-// Setup drop zones
 function setupDropZones() {
     const leftDropZone = document.getElementById('leftDropZone');
     const rightDropZone = document.getElementById('rightDropZone');
@@ -352,7 +445,6 @@ async function handleDrop(e) {
     
     if (!block) return;
 
-    // Prevent moving default blocks to inactive
     if (block.isDefault && e.target.id === 'leftDropZone') {
         showError('Default blocks cannot be moved to inactive area');
         return;
@@ -367,14 +459,11 @@ async function handleDrop(e) {
             block.isActive = isMovingToActive;
             
             if (isMovingToActive) {
-                // Moving to active - set arrangement to end
                 const activeBlocks = blocks.filter(b => b.isActive);
                 block.arrangement = activeBlocks.length - 1;
             } else {
-                // Moving to inactive - remove arrangement
                 block.arrangement = null;
                 
-                // Reorder remaining active blocks
                 const activeBlocks = blocks.filter(b => b.isActive && b.id !== blockId);
                 activeBlocks.sort((a, b) => (a.arrangement || 0) - (b.arrangement || 0));
                 activeBlocks.forEach((b, index) => {
@@ -390,7 +479,6 @@ async function handleDrop(e) {
             renderBlocks();
             showSuccess('Block moved successfully');
         } catch (error) {
-            // Revert changes on error
             block.isActive = !isMovingToActive;
             renderBlocks();
         } finally {
@@ -435,7 +523,51 @@ async function addNewBlock() {
         hideAddBlockModal();
         showSuccess('Block added successfully');
     } catch (error) {
-        // Error already handled in saveBlockToDatabase
+    } finally {
+        hideLoading();
+    }
+}
+
+function showEditBlockModal(blockId, currentText) {
+    document.getElementById('editBlockId').value = blockId;
+    document.getElementById('blockTextInputEdit').value = currentText;
+    document.getElementById('editModal').classList.add('show');
+    document.getElementById('blockTextInputEdit').focus();
+}
+
+function hideEditBlockModal() {
+    document.getElementById('editModal').classList.remove('show');
+    document.getElementById('editBlockId').value = '';
+    document.getElementById('blockTextInputEdit').value = '';
+}
+
+async function updateBlock() {
+    const blockId = document.getElementById('editBlockId').value;
+    const newText = document.getElementById('blockTextInputEdit').value.trim();
+
+    if (!newText) {
+        showError('Block text cannot be empty.');
+        return;
+    }
+
+    if (!blockId) {
+        showError('Error: Block ID is missing.');
+        return;
+    }
+
+    try {
+        showLoading();
+        await updateBlockInDatabase(blockId, { text: newText });
+
+        const blockToUpdate = blocks.find(b => b.id === blockId);
+        if (blockToUpdate) {
+            blockToUpdate.text = newText;
+        }
+
+        renderBlocks();
+        hideEditBlockModal();
+        showSuccess('Block updated successfully!');
+    } catch (error) {
     } finally {
         hideLoading();
     }
@@ -452,38 +584,9 @@ async function deleteBlock(blockId) {
             renderBlocks();
             showSuccess('Block deleted successfully');
         } catch (error) {
-            // Error already handled in deleteBlockFromDatabase
         } finally {
             hideLoading();
         }
-    }
-}
-
-async function saveArrangement() {
-    try {
-        showLoading();
-        
-        const activeBlocks = blocks.filter(b => b.isActive).sort((a, b) => (a.arrangement || 0) - (b.arrangement || 0));
-        await updateArrangementInDatabase(activeBlocks);
-        
-        // Visual feedback
-        const btn = event.target;
-        const originalText = btn.textContent;
-        const originalStyle = btn.style.background;
-        
-        btn.textContent = 'Saved!';
-        btn.style.background = 'linear-gradient(45deg, #27ae60, #2ecc71)';
-        
-        setTimeout(() => {
-            btn.textContent = originalText;
-            btn.style.background = originalStyle;
-        }, 1500);
-        
-        showSuccess('Arrangement saved successfully');
-    } catch (error) {
-        // Error already handled in updateArrangementInDatabase
-    } finally {
-        hideLoading();
     }
 }
 
@@ -492,13 +595,11 @@ async function resetToDefaults() {
         try {
             showLoading();
             
-            // Delete all custom blocks
             const customBlocks = blocks.filter(b => !b.isDefault);
             for (const block of customBlocks) {
                 await deleteBlockFromDatabase(block.id);
             }
             
-            // Reset default blocks to active
             const defaultBlocks = blocks.filter(b => b.isDefault);
             for (let i = 0; i < defaultBlocks.length; i++) {
                 await updateBlockInDatabase(defaultBlocks[i].id, {
@@ -507,11 +608,9 @@ async function resetToDefaults() {
                 });
             }
             
-            // Reload from database
             await fetchBlocks();
             showSuccess('Reset to defaults successfully');
         } catch (error) {
-            // Error already handled in individual functions
         } finally {
             hideLoading();
         }
@@ -525,9 +624,31 @@ document.getElementById('blockTextInput').addEventListener('keypress', (e) => {
     }
 });
 
+document.getElementById('blockTextInputEdit').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        updateBlock();
+    }
+});
+
+// Handle page unload to stop services
+window.addEventListener('beforeunload', () => {
+    if (serviceControlButton && serviceControlButton.classList.contains('active')) {
+        fetch(`${API_BASE}/service/stop`, {
+            method: 'GET',
+            keepalive: true,
+        });
+    }
+});
+
 // Initialize the application
 document.addEventListener('DOMContentLoaded', () => {
+    // Assign DOM elements after they are loaded
+    serviceControlButton = document.getElementById('service-control-btn');
+    serviceModal = document.getElementById('serviceModal');
+    ngrokUrlDisplay = document.getElementById('ngrokUrlDisplay');
+
     setupDropZones();
     fetchBlocks();
     fetchTwilioInformation();
+    checkServiceStatus();
 });
