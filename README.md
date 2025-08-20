@@ -19,6 +19,7 @@
 3)	Get the code and start the app
     a.	Run in terminal(replace <your-repo-url> with your actual path)
         git clone <your-repo-url>
+    c.  Create a .env file follow the .env.example in TwilioAPI directory
     b.	Find start.bat and run, it should install needed dependencies and start the program
 4)	Configure the app
     a.	Open the left Menu Sidebar and paste:
