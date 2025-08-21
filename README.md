@@ -1,4 +1,4 @@
-This Program can only be run on windows, and not tested in Linux
+# This Program can only be run on windows, and not tested in Linux
 
 1)	Install prerequisites (and add to PATH)
     a.	Git → install from git-scm.com
